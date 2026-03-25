@@ -1,22 +1,10 @@
 import React, { memo } from 'react';
 import { t, translateField } from '../i18n/translations';
 
-const statusConfig = {
-    ARRIVED: { label: 'ARRIVED', className: 'status-ARRIVED', icon: '✓' },
-    NEAR: { label: 'NEAR', className: 'status-NEAR', icon: '✓' },
-    APPROACHING: { label: 'APPROACHING', className: 'status-APPROACHING', icon: '✓' },
-};
-
 const ArrivalBoard = memo(({ buses = [], sizes = {} }) => {
-    const formatDistance = (meters) => {
-        if (!meters) return '—';
-        if (meters < 1000) return `${Math.round(meters)}m`;
-        return `${(meters / 1000).toFixed(1)}km`;
-    };
-
     const formatETA = (status, distance) => {
         if (status === 'ARRIVED') return '< 1 min';
-        if (!distance) return '—';
+        if (!distance) return 'â€”';
         const eta = Math.ceil(distance / 5.56 / 60);
         return eta > 0 ? `${eta} min` : '< 1 min';
     };
@@ -45,14 +33,12 @@ const ArrivalBoard = memo(({ buses = [], sizes = {} }) => {
                                 <th><span className="lang-en">{t('display', 'route', 'en')}</span><span className="lang-ml">{t('display', 'route', 'ml')}</span><span className="lang-hi">{t('display', 'route', 'hi')}</span></th>
                                 <th><span className="lang-en">{t('display', 'destination', 'en')}</span><span className="lang-ml">{t('display', 'destination', 'ml')}</span><span className="lang-hi">{t('display', 'destination', 'hi')}</span></th>
                                 <th><span className="lang-en">{t('display', 'platform', 'en')}</span><span className="lang-ml">{t('display', 'platform', 'ml')}</span><span className="lang-hi">{t('display', 'platform', 'hi')}</span></th>
-                                <th><span className="lang-en">{t('display', 'distance', 'en')}</span><span className="lang-ml">{t('display', 'distance', 'ml')}</span><span className="lang-hi">{t('display', 'distance', 'hi')}</span></th>
                                 <th><span className="lang-en">{t('display', 'eta', 'en')}</span><span className="lang-ml">{t('display', 'eta', 'ml')}</span><span className="lang-hi">{t('display', 'eta', 'hi')}</span></th>
                                 <th><span className="lang-en">{t('display', 'status', 'en')}</span><span className="lang-ml">{t('display', 'status', 'ml')}</span><span className="lang-hi">{t('display', 'status', 'hi')}</span></th>
                             </tr>
                         </thead>
                         <tbody>
                             {buses.map((bus, idx) => {
-                                const config = statusConfig[bus.status] || statusConfig.APPROACHING;
                                 return (
                                     <tr key={bus.id || idx} className={`status-row-${bus.status}`}>
                                         <td className="bus-number-cell"><strong>{bus.bus_number}</strong></td>
@@ -71,8 +57,7 @@ const ArrivalBoard = memo(({ buses = [], sizes = {} }) => {
                                             <span className="lang-ml">{translateField('destinations', bus.destination, 'ml')}</span>
                                             <span className="lang-hi">{translateField('destinations', bus.destination, 'hi')}</span>
                                         </td>
-                                        <td>{bus.platform || '—'}</td>
-                                        <td>{formatDistance(bus.distance_from_depot)}</td>
+                                        <td>{bus.platform || 'â€”'}</td>
                                         <td>{formatETA(bus.status, bus.distance_from_depot)}</td>
                                         <td className={`status-${bus.status}`}>
                                             <span className="lang-en">{t('display', `statusLabels.${bus.status}`, 'en')}</span>

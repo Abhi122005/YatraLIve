@@ -31,11 +31,41 @@ function getBearing(lat1, lon1, lat2, lon2) {
 
 // Determine status based on distance
 function determineStatus(distanceMeters, isDelayed, radii) {
-    if (isDelayed) return 'DELAYED';
+    if (isDelayed && distanceMeters > radii.approaching) return 'DELAYED';
     if (distanceMeters <= radii.arrived) return 'ARRIVED';
     if (distanceMeters <= radii.near) return 'NEAR';
     if (distanceMeters <= radii.approaching) return 'APPROACHING';
     return 'SCHEDULED';
+}
+
+function getPositionAtDistance(depotLat, depotLng, distanceMeters) {
+    const latOffset = distanceMeters / 111320.0;
+    return {
+        latitude: depotLat + latOffset,
+        longitude: depotLng,
+    };
+}
+
+function getManualBusInitialState(busData, depotLat, depotLng, radii) {
+    const selectedStatus = (busData.status || 'APPROACHING').toUpperCase();
+    const targetDistanceByStatus = {
+        ARRIVED: Math.max(10, Math.min(radii.arrived - 10, radii.arrived)),
+        NEAR: Math.max(radii.arrived + 10, Math.min(radii.near - 10, radii.near - 20)),
+        APPROACHING: Math.max(radii.near + 10, Math.min(radii.approaching - 10, radii.approaching - 20)),
+        DELAYED: radii.approaching + 100,
+    };
+    const distance = targetDistanceByStatus[selectedStatus] ?? radii.approaching - 20;
+    const position = getPositionAtDistance(depotLat, depotLng, distance);
+
+    return {
+        status: selectedStatus,
+        is_delayed: selectedStatus === 'DELAYED',
+        distance: Math.round(distance),
+        latitude: position.latitude,
+        longitude: position.longitude,
+        arrivedAt: selectedStatus === 'ARRIVED' ? Date.now() : null,
+        departedAt: null,
+    };
 }
 
 export class Simulation {
@@ -91,6 +121,10 @@ export class Simulation {
             const dist = getDistance(bus.latitude, bus.longitude, this.depotLat, this.depotLng);
             bus.distance = Math.round(dist);
 
+            if (bus.is_delayed && dist <= this.radii.approaching) {
+                bus.is_delayed = false;
+            }
+
             const oldStatus = bus.status;
             bus.status = determineStatus(dist, bus.is_delayed, this.radii);
 
@@ -121,6 +155,27 @@ export class Simulation {
     }
 
     addManualBus(busData) {
+        const existingBus = this.buses.find(bus => bus.bus_number === busData.bus_number);
+        const manualState = getManualBusInitialState(busData, this.depotLat, this.depotLng, this.radii);
+        if (existingBus) {
+            existingBus.bus_type = busData.bus_type;
+            existingBus.route = busData.route;
+            existingBus.destination = busData.destination;
+            existingBus.localizedFields = busData.localizedFields || existingBus.localizedFields || null;
+            existingBus.status = manualState.status;
+            existingBus.is_delayed = manualState.is_delayed;
+            existingBus.distance = manualState.distance;
+            existingBus.latitude = manualState.latitude;
+            existingBus.longitude = manualState.longitude;
+            existingBus.arrivedAt = manualState.arrivedAt;
+            existingBus.departedAt = manualState.departedAt;
+            existingBus.isManualEntry = true;
+            if (this.onUpdate) {
+                this.onUpdate([...this.buses], [...this.departed]);
+            }
+            return existingBus;
+        }
+
         const manualBus = {
             id: this.nextManualBusId++,
             bus_number: busData.bus_number,
@@ -128,18 +183,13 @@ export class Simulation {
             route: busData.route,
             destination: busData.destination,
             localizedFields: busData.localizedFields || null,
-            status: 'SCHEDULED',
-            is_delayed: false,
-            latitude: this.depotLat + 0.012,
-            longitude: this.depotLng + 0.012,
-            distance: Math.round(getDistance(
-                this.depotLat + 0.012,
-                this.depotLng + 0.012,
-                this.depotLat,
-                this.depotLng
-            )),
-            arrivedAt: null,
-            departedAt: null,
+            status: manualState.status,
+            is_delayed: manualState.is_delayed,
+            latitude: manualState.latitude,
+            longitude: manualState.longitude,
+            distance: manualState.distance,
+            arrivedAt: manualState.arrivedAt,
+            departedAt: manualState.departedAt,
             isManualEntry: true,
         };
 

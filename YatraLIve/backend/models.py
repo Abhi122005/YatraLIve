@@ -34,3 +34,20 @@ class DepotConfig(Base):
     radius_near = Column(Integer, default=400)           # metres
     radius_arrived = Column(Integer, default=100)        # metres
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ManualBusEntry(Base):
+    __tablename__ = "manual_bus_entries"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    bus_number = Column(String, unique=True, nullable=False)
+    bus_type = Column(String, nullable=False)
+    route = Column(String, nullable=False)
+    destination = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="APPROACHING")
+    route_ml = Column(String, nullable=True)
+    route_hi = Column(String, nullable=True)
+    destination_ml = Column(String, nullable=True)
+    destination_hi = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -123,7 +123,7 @@ export const dynamicTranslations = {
     'EXPRESS': { ml: 'എക്സ്പ്രസ്സ്', hi: 'एक्सप्रेस' },
   },
   destinations: {
-    'KOZHIKODE': { ml: '\u0d15\u0d4b\u0d34\u0d3f\u0d15\u0d4d\u0d15\u0d4b\u0d1f\u0d4d', hi: '\u0915\u094b\u091d\u093c\u093f\u0915\u094b\u0921' },
+    'KOZHIKODE': { ml: '\u0d15\u0d4b\u0d34\u0d3f\u0d15\u0d4d\u0d15\u0d4b\u0d1f\u0d4d', hi: '\u0915\u094b\u091d\u093c\u093f\u0915\u094b\u0921\u0915\u0947\u0932\u093f\u090f' },
     'THIRUVANANTHAPURAM': { ml: '\u0d24\u0d3f\u0d30\u0d41\u0d35\u0d28\u0d28\u0d4d\u0d24\u0d2a\u0d41\u0d30\u0d02', hi: '\u0924\u093f\u0930\u0941\u0935\u0928\u0902\u0924\u092a\u0941\u0930\u092e' },
     'TRIVANDRUM': { ml: '\u0d24\u0d3f\u0d30\u0d41\u0d35\u0d28\u0d28\u0d4d\u0d24\u0d2a\u0d41\u0d30\u0d02', hi: '\u0924\u093f\u0930\u0941\u0935\u0928\u0902\u0924\u092a\u0941\u0930\u092e' },
     'MUVATTUPUZHA': { ml: '\u0d2e\u0d42\u0d35\u0d3e\u0d31\u0d4d\u0d31\u0d41\u0d2a\u0d41\u0d34', hi: '\u092e\u0942\u0935\u093e\u091f\u094d\u091f\u0941\u092a\u0941\u0934\u093e' },
@@ -146,6 +146,7 @@ export const dynamicTranslations = {
     'VIA THRISSUR': { ml: 'തൃശ്ശൂർ വഴി', hi: 'त्रिशूर के रास्ते' },
     'VIA ANGAMALY': { ml: 'അങ്കമാലി വഴി', hi: 'अंगमाली के रास्ते' },
     'VIA PARAVOOR': { ml: 'പറവൂർ വഴി', hi: 'परवूर के रास्ते' },
+    'VIA KARAKKAD': { ml: 'കാരക്കാട് വഴി', hi: 'कारक्काड के रास्ते' },
   },
 };
 
@@ -154,6 +155,10 @@ const normalizeDynamicKey = (value = '') =>
     .trim()
     .replace(/\s+/g, ' ')
     .toUpperCase();
+
+const malayalamAnnouncementDestinations = {
+  KOZHIKODE: '\u0d15\u0d4b\u0d34\u0d3f\u0d15\u0d4d\u0d15\u0d4b\u0d1f\u0d4d\u0d1f\u0d47\u0d15\u0d4d\u0d15\u0d41\u0d33\u0d4d\u0d33',
+};
 
 const translateDestinationValue = (value, lang) => {
   const key = normalizeDynamicKey(value);
@@ -213,7 +218,11 @@ export const formatAnnouncement = (type, data, lang = 'en') => {
   // When generating non-English announcements, translate dynamic fields too
   const busNumber = data.bus_number || data.busNumber;
   const route = lang === 'en' ? data.route : (translateField('routes', data.route, lang) || data.route);
-  const destination = lang === 'en' ? data.destination : (translateField('destinations', data.destination, lang) || data.destination);
+  const translatedDestination = lang === 'en' ? data.destination : (translateField('destinations', data.destination, lang) || data.destination);
+  const destination =
+    lang === 'ml' && type !== 'busApproaching'
+      ? (malayalamAnnouncementDestinations[normalizeDynamicKey(data.destination)] || `${translatedDestination} \u0d32\u0d47\u0d15\u0d4d\u0d15\u0d41\u0d33\u0d4d\u0d33`)
+      : translatedDestination;
   const platform = data.platform || '—';
   
   return template

@@ -4,9 +4,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 import os
+from sqlalchemy import inspect, text
 
 from .database import engine, Base, SessionLocal
-from .models import Bus, DepotConfig
+from .models import Bus, DepotConfig, ManualBusEntry
 from .bus_manager import (
     init_bus_states, get_all_buses, get_arrival_board,
     get_delay_alerts, get_recent_departures_list,
@@ -51,6 +52,20 @@ class DepotLocationUpdate(BaseModel):
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class LocalizedFieldSet(BaseModel):
+    ml: str
+    hi: str
+
+
+class ManualBusCreate(BaseModel):
+    bus_number: str
+    bus_type: str
+    route: str
+    destination: str
+    status: str = "APPROACHING"
+    localizedFields: dict[str, LocalizedFieldSet]
 
 
 # ──── Seed Data ────
@@ -121,11 +136,45 @@ def seed_data():
         db.close()
 
 
+def serialize_manual_bus(bus: ManualBusEntry) -> dict:
+    return {
+        "id": bus.id,
+        "bus_number": bus.bus_number,
+        "bus_type": bus.bus_type,
+        "route": bus.route,
+        "destination": bus.destination,
+        "status": bus.status or "APPROACHING",
+        "localizedFields": {
+            "route": {
+                "ml": bus.route_ml or bus.route,
+                "hi": bus.route_hi or bus.route,
+            },
+            "destination": {
+                "ml": bus.destination_ml or bus.destination,
+                "hi": bus.destination_hi or bus.destination,
+            },
+        },
+    }
+
+
+def ensure_manual_bus_status_column():
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("manual_bus_entries")}
+    if "status" in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE manual_bus_entries ADD COLUMN status VARCHAR NOT NULL DEFAULT 'APPROACHING'")
+        )
+
+
 # ──── Startup ────
 
 @app.on_event("startup")
 async def startup():
     seed_data()
+    ensure_manual_bus_status_column()
     init_bus_states()
     start_simulation()
 
@@ -169,6 +218,53 @@ async def create_bus(bus: BusCreate):
         return new_bus
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/manual_buses")
+async def list_manual_buses():
+    db = SessionLocal()
+    try:
+        buses = db.query(ManualBusEntry).order_by(ManualBusEntry.created_at.asc()).all()
+        return [serialize_manual_bus(bus) for bus in buses]
+    finally:
+        db.close()
+
+
+@app.post("/manual_buses")
+async def create_manual_bus(bus: ManualBusCreate):
+    db = SessionLocal()
+    try:
+        existing = db.query(ManualBusEntry).filter(ManualBusEntry.bus_number == bus.bus_number).first()
+        if existing:
+            existing.bus_type = bus.bus_type
+            existing.route = bus.route
+            existing.destination = bus.destination
+            existing.status = bus.status
+            existing.route_ml = bus.localizedFields["route"].ml
+            existing.route_hi = bus.localizedFields["route"].hi
+            existing.destination_ml = bus.localizedFields["destination"].ml
+            existing.destination_hi = bus.localizedFields["destination"].hi
+            db.commit()
+            db.refresh(existing)
+            return serialize_manual_bus(existing)
+
+        manual_bus = ManualBusEntry(
+            bus_number=bus.bus_number,
+            bus_type=bus.bus_type,
+            route=bus.route,
+            destination=bus.destination,
+            status=bus.status,
+            route_ml=bus.localizedFields["route"].ml,
+            route_hi=bus.localizedFields["route"].hi,
+            destination_ml=bus.localizedFields["destination"].ml,
+            destination_hi=bus.localizedFields["destination"].hi,
+        )
+        db.add(manual_bus)
+        db.commit()
+        db.refresh(manual_bus)
+        return serialize_manual_bus(manual_bus)
+    finally:
+        db.close()
 
 
 @app.post("/buses/{bus_id}/delay")

@@ -67,8 +67,8 @@ def update_bus_position(bus_id: int, lat: float, lng: float):
         )
         state["distance_from_depot"] = round(distance, 1)
 
-        # Auto-undelay if bus enters NEAR zone
-        if state["is_delayed"] and distance <= 400:
+        # Auto-undelay once the bus enters the outer geofence.
+        if state["is_delayed"] and distance <= 800:
             state["is_delayed"] = False
 
         old_status = state["status"]

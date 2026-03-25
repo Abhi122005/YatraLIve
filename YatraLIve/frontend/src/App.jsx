@@ -4,8 +4,13 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './index.css'; // Terminal styles
 import { t, translateField } from './i18n/translations';
+import { addManualBus as saveManualBus, getManualBuses } from './api';
+import { ttsService } from './services/ttsService';
 
 const BOARD_LABELS = ['ARRIVALS', 'DELAYS', 'DEPARTURES'];
+const MALAYALAM_DESTINATION_ANNOUNCEMENT_FORMS = {
+  KOZHIKODE: '\u0d15\u0d4b\u0d34\u0d3f\u0d15\u0d4d\u0d15\u0d4b\u0d1f\u0d4d\u0d1f\u0d47\u0d15\u0d4d\u0d15\u0d41\u0d33\u0d4d\u0d33',
+};
 
 const SCRIPT_CONFIG = {
   hi: {
@@ -138,6 +143,11 @@ const getBusFieldValue = (bus, field, lang = 'en') => {
   return translateField(translationField, bus[field], lang);
 };
 
+const getMalayalamDestinationAnnouncementText = (bus) => {
+  const key = (bus.destination || '').trim().toUpperCase();
+  return MALAYALAM_DESTINATION_ANNOUNCEMENT_FORMS[key] || `${getBusFieldValue(bus, 'destination', 'ml')} \u0d32\u0d47\u0d15\u0d4d\u0d15\u0d41\u0d33\u0d4d\u0d33`;
+};
+
 export default function App() {
   const [view, setView] = useState('login'); // 'login' | 'location' | 'dashboard'
 
@@ -157,7 +167,8 @@ export default function App() {
     bus_number: '',
     bus_type: '',
     route: '',
-    destination: ''
+    destination: '',
+    status: 'APPROACHING'
   });
   const [manualBusMessage, setManualBusMessage] = useState('');
 
@@ -188,7 +199,16 @@ export default function App() {
   };
 
   // Handles setting location and starting simulation
-  const handleSetLocation = (e) => {
+  const loadStoredManualBuses = async (simulation) => {
+    try {
+      const storedBuses = await getManualBuses();
+      storedBuses.forEach(bus => simulation.addManualBus(bus));
+    } catch (err) {
+      console.warn('Failed to load manual buses from backend:', err);
+    }
+  };
+
+  const handleSetLocation = async (e) => {
     e.preventDefault();
     const lat = parseFloat(locLat);
     const lng = parseFloat(locLng);
@@ -210,11 +230,12 @@ export default function App() {
       setBuses(updatedBuses);
       setDepartures(updatedDepartures);
     });
+    await loadStoredManualBuses(simRef.current);
 
     setView('dashboard');
   };
 
-  const handleManualBusSubmit = (e) => {
+  const handleManualBusSubmit = async (e) => {
     e.preventDefault();
     if (!simRef.current) {
       setManualBusMessage('SIMULATION NOT INITIALISED.');
@@ -233,22 +254,41 @@ export default function App() {
       return;
     }
 
-    simRef.current.addManualBus({
+    const payload = {
       bus_number: manualBus.bus_number.trim().toUpperCase(),
       bus_type: manualBus.bus_type.trim(),
       route: manualBus.route.trim(),
       destination: manualBus.destination.trim(),
+      status: manualBus.status,
       localizedFields: buildLocalizedManualFields({
         route: manualBus.route.trim(),
         destination: manualBus.destination.trim(),
       })
-    });
+    };
+
+    try {
+      const savedBus = await saveManualBus(payload);
+      simRef.current.addManualBus(savedBus);
+    } catch (err) {
+      console.error('Failed to save manual bus:', err);
+      simRef.current.addManualBus(payload);
+      setManualBusMessage('BUS ADDED LOCALLY. START BACKEND TO SYNC ACROSS MODES.');
+      setManualBus({
+        bus_number: '',
+        bus_type: '',
+        route: '',
+        destination: '',
+        status: 'APPROACHING'
+      });
+      return;
+    }
 
     setManualBus({
       bus_number: '',
       bus_type: '',
       route: '',
-      destination: ''
+      destination: '',
+      status: 'APPROACHING'
     });
     setManualBusMessage('BUS ADDED TO ADMIN TRACKING.');
   };
@@ -279,37 +319,12 @@ export default function App() {
         announcedRef.current.add(busKey);
 
         // Translate destination and route to proper Malayalam for natural TTS
-        const mlDest = getBusFieldValue(bus, 'destination', 'ml') || bus.destination;
+        const mlDestAnnouncement = getMalayalamDestinationAnnouncementText(bus);
         const mlRoute = getBusFieldValue(bus, 'route', 'ml') || bus.route;
-        const mlText = `യാത്രക്കാരുടെ ശ്രദ്ധയ്ക്ക്. ${mlRoute} ${mlDest} ലേക്കുള്ള ബസ് സ്റ്റേഷനിൽ എത്തിയിരിക്കുന്നു.`;
+        const mlText = `യാത്രക്കാരുടെ ശ്രദ്ധയ്ക്ക്. ${mlRoute} ${mlDestAnnouncement} ബസ് സ്റ്റേഷനിൽ എത്തിയിരിക്കുന്നു.`;
 
-        // Use Google Translate TTS for Malayalam (proper ml-IN voice)
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(mlText)}&tl=ml&client=tw-ob`;
-        const audio = new Audio(ttsUrl);
-        audio.volume = 1;
-        audio.play().catch((err) => {
-          console.warn('Google TTS failed, trying native speech:', err);
-          // Fallback: try native Web Speech API
-          if (window.speechSynthesis) {
-            const voices = window.speechSynthesis.getVoices();
-            const mlVoice = voices.find(v => v.lang.toLowerCase().includes('ml'));
-            
-            let utterance;
-            if (mlVoice) {
-              utterance = new SpeechSynthesisUtterance(mlText);
-              utterance.voice = mlVoice;
-              utterance.lang = 'ml-IN';
-            } else {
-              // Final fallback: Manglish via English voice
-              const manglishText = `Yathrakkarude shradhakku. ${bus.destination} laykkulla bus stationil ethiyirikkunnu.`;
-              utterance = new SpeechSynthesisUtterance(manglishText);
-              utterance.lang = 'en-IN';
-              const enVoice = voices.find(v => v.lang === 'en-IN') || voices.find(v => v.lang.startsWith('en'));
-              if (enVoice) utterance.voice = enVoice;
-            }
-            utterance.rate = 0.8;
-            window.speechSynthesis.speak(utterance);
-          }
+        ttsService.speakAnnouncement(mlText, 'ml').catch((err) => {
+          console.warn('Malayalam TTS failed:', err);
         });
       }
     });
@@ -425,12 +440,11 @@ export default function App() {
             <th><span className="lang-en">{t('display', 'route', 'en')}</span><span className="lang-ml">{t('display', 'route', 'ml')}</span><span className="lang-hi">{t('display', 'route', 'hi')}</span></th>
             <th><span className="lang-en">{t('display', 'destination', 'en')}</span><span className="lang-ml">{t('display', 'destination', 'ml')}</span><span className="lang-hi">{t('display', 'destination', 'hi')}</span></th>
             <th><span className="lang-en">{t('display', 'status', 'en')}</span><span className="lang-ml">{t('display', 'status', 'ml')}</span><span className="lang-hi">{t('display', 'status', 'hi')}</span></th>
-            <th><span className="lang-en">{t('display', 'distance', 'en')}</span><span className="lang-ml">{t('display', 'distance', 'ml')}</span><span className="lang-hi">{t('display', 'distance', 'hi')}</span></th>
           </tr>
         </thead>
         <tbody>
           {arrivalBoard.length === 0 ? (
-            <tr><td colSpan="6" className="empty-row">
+            <tr><td colSpan="5" className="empty-row">
               <span className="lang-en">{t('display', 'noData', 'en')}</span>
               <span className="lang-ml">{t('display', 'noData', 'ml')}</span>
               <span className="lang-hi">{t('display', 'noData', 'hi')}</span>
@@ -455,7 +469,6 @@ export default function App() {
                   <span className="lang-hi">{getBusFieldValue(b, 'destination', 'hi')}</span>
                 </td>
                 <td>{b.status}</td>
-                <td>{b.distance}m</td>
               </tr>
             ))
           )}
@@ -529,7 +542,7 @@ export default function App() {
             <th><span className="lang-en">{t('display', 'busNumber', 'en')}</span><span className="lang-ml">{t('display', 'busNumber', 'ml')}</span><span className="lang-hi">{t('display', 'busNumber', 'hi')}</span></th>
             <th><span className="lang-en">{t('display', 'type', 'en')}</span><span className="lang-ml">{t('display', 'type', 'ml')}</span><span className="lang-hi">{t('display', 'type', 'hi')}</span></th>
             <th><span className="lang-en">{t('display', 'destination', 'en')}</span><span className="lang-ml">{t('display', 'destination', 'ml')}</span><span className="lang-hi">{t('display', 'destination', 'hi')}</span></th>
-            <th><span className="lang-en">{t('display', 'platform', 'en')}</span><span className="lang-ml">{t('display', 'platform', 'ml')}</span><span className="lang-hi">{t('display', 'platform', 'hi')}</span></th>
+            <th><span className="lang-en">{t('display', 'route', 'en')}</span><span className="lang-ml">{t('display', 'route', 'ml')}</span><span className="lang-hi">{t('display', 'route', 'hi')}</span></th>
             <th><span className="lang-en">{t('display', 'status', 'en')}</span><span className="lang-ml">{t('display', 'status', 'ml')}</span><span className="lang-hi">{t('display', 'status', 'hi')}</span></th>
           </tr>
         </thead>
@@ -554,7 +567,11 @@ export default function App() {
                   <span className="lang-ml">{getBusFieldValue(b, 'destination', 'ml')}</span>
                   <span className="lang-hi">{getBusFieldValue(b, 'destination', 'hi')}</span>
                 </td>
-                <td>{b.platform || '—'}</td>
+                <td>
+                  <span className="lang-en">{b.route}</span>
+                  <span className="lang-ml">{getBusFieldValue(b, 'route', 'ml')}</span>
+                  <span className="lang-hi">{getBusFieldValue(b, 'route', 'hi')}</span>
+                </td>
                 <td>DEPARTED</td>
               </tr>
             ))
@@ -592,6 +609,16 @@ export default function App() {
           value={manualBus.destination}
           onChange={(e) => setManualBus({ ...manualBus, destination: e.target.value })}
         />
+        <select
+          className="terminal-input"
+          value={manualBus.status}
+          onChange={(e) => setManualBus({ ...manualBus, status: e.target.value })}
+        >
+          <option value="DELAYED">DELAY</option>
+          <option value="ARRIVED">ARRIVED</option>
+          <option value="APPROACHING">APPROACHING</option>
+          <option value="NEAR">NEAR</option>
+        </select>
         <button className="terminal-btn" type="submit">ADD BUS MANUALLY</button>
       </form>
       {manualBusMessage && <div className="manual-bus-message">{manualBusMessage}</div>}
@@ -605,13 +632,12 @@ export default function App() {
               <th>ROUTE</th>
               <th>DESTINATION</th>
               <th>STATUS</th>
-              <th>DISTANCE</th>
             </tr>
           </thead>
           <tbody>
             {adminBoard.length === 0 ? (
               <tr>
-                <td colSpan="6" className="empty-row">NO ACTIVE BUSES</td>
+                <td colSpan="5" className="empty-row">NO ACTIVE BUSES</td>
               </tr>
             ) : (
               adminBoard.map((bus) => (
@@ -633,7 +659,6 @@ export default function App() {
                     <span className="lang-hi">{getBusFieldValue(bus, 'destination', 'hi')}</span>
                   </td>
                   <td>{bus.status}</td>
-                  <td>{bus.distance != null ? `${bus.distance}m` : 'OUTSIDE RADAR'}</td>
                 </tr>
               ))
             )}
